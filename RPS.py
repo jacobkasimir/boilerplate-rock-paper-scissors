@@ -1,31 +1,56 @@
-def player(prev_play, opponent_history=[]):
-    if prev_play:
-        opponent_history.append(prev_play)
+BEATS = {"R": "P", "P": "S", "S": "R"}   # BEATS[x] = the move that beats x
+MOVES = ["R", "P", "S"]
+DECAY = 0.9
 
-    if len(opponent_history) < 2:
+# ---- experts: each predicts the opponent's NEXT move ----
+def quincy(me, opp):
+    choices = ["R", "R", "P", "P", "S"]
+    return choices[(len(opp) + 1) % 5]
+
+def kris(me, opp):
+    return BEATS[me[-1]] if me else "P"
+
+def mrugesh(me, opp):
+    if not me:
         return "R"
+    recent = me[-10:]
+    return BEATS[max(MOVES, key=recent.count)]
 
-    # Predict the opponent's next move based on previous patterns
-    last_two = "".join(opponent_history[-2:])
+def abbey(me, opp):
+    seq = ["R"] + me                      # Abbey seeds its history with "R"
+    counts = {a + b: 0 for a in MOVES for b in MOVES}
+    for a, b in zip(seq, seq[1:]):
+        counts[a + b] += 1
+    last = seq[-1]
+    predicted_mine = max(MOVES, key=lambda m: counts[last + m])  # ties -> R,P,S
+    return BEATS[predicted_mine]
 
-    # Counter the most likely next move
-    counter = {"R": "P", "P": "S", "S": "R"}
+EXPERTS = {"quincy": quincy, "kris": kris, "mrugesh": mrugesh, "abbey": abbey}
 
-    # Look for patterns in the opponent's history
-    patterns = {}
-    for i in range(len(opponent_history) - 2):
-        pattern = "".join(opponent_history[i:i + 2])
-        next_move = opponent_history[i + 2]
+# ---- persistent state (module level, so it survives between calls) ----
+S = {"me": [], "opp": [], "score": {}, "last": {}}
 
-        if pattern not in patterns:
-            patterns[pattern] = {"R": 0, "P": 0, "S": 0}
+def _reset():
+    S["me"], S["opp"] = [], []
+    S["score"] = {name: 0.0 for name in EXPERTS}
+    S["last"] = {}
 
-        patterns[pattern][next_move] += 1
+_reset()
 
-    if last_two in patterns:
-        predicted_move = max(patterns[last_two], key=patterns[last_two].get)
-        return counter[predicted_move]
+def player(prev_play):
+    if prev_play == "":                    # new match
+        _reset()
+    else:
+        S["opp"].append(prev_play)
+        # decayed reward/penalty for each expert's previous prediction
+        for name, pred in S["last"].items():
+            S["score"][name] = DECAY * S["score"][name] + (1 if pred == prev_play else -1)
 
-    # Fallback strategy
-    most_common = max(set(opponent_history), key=opponent_history.count)
-    return counter[most_common]
+    me, opp = S["me"], S["opp"]
+    S["last"] = {name: f(me, opp) for name, f in EXPERTS.items()}
+
+    best = max(S["score"], key=S["score"].get)
+    my_move = BEATS[S["last"][best]]
+
+    me.append(my_move)
+    return my_move
